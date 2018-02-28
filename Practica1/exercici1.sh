@@ -15,4 +15,5 @@ else
         fi
     done
     echo $result
+    exit 0
 fi
