@@ -1,2 +1,0 @@
--Proposta sript P2
--Exercicis P2
