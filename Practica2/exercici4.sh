@@ -8,7 +8,7 @@ else
     	ext=$1
 	c1=$2
 	c2=$3
-	contar_paraula="echo {} \$(grep -o $c1 {} | wc -l); sed -n 's/$c1/$c2/g' {}"
+	contar_paraula="echo {} \$(grep -o $c1 {} | wc -l); sed -i -- 's/$c1/$c2/g' {}"
 	#echo $contar_paraula
 	find . -name "*.$ext" -type f -exec bash -c "$contar_paraula" \;	
     	
