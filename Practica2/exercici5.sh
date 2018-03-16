@@ -7,7 +7,7 @@ then
 else
 
     user="$(whoami)"
-    if [ ${#user} -le 8 ]
+    if [ ${#user} -le 8 ] #comprovem si el nom es talla en la commanda ps aux
     then
         ps aux | grep $user | sort -fk3 -r | head -n 5 | awk '{print $2"\t"$3"\t"$11}'
     else
