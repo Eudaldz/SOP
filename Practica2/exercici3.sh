@@ -8,7 +8,7 @@ else
     dir2=$2
     for file in $(find $dir1 -type f)
     do
-	file_c=$dir2${file#$dir1}        
+	file_c=$dir2${file#$dir1}#alternem directori        
 	if ! [[ -f $file_c  ]]; then
         	echo "$file_c $file"
 	fi
