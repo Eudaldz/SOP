@@ -1,11 +1,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+
+
+#define CONSUMER_BUFFER_SIZE 256
+
+
 
 struct Data {
     int* passenger_count;
@@ -34,7 +40,8 @@ int main(int argc, char *argv[])
 	int consumers = atoi(argv[2]);
 	int lines = atoi(argv[3]);
 	consumers = 1; /* forzamos un consumidor */
-	int pids[consumers];	
+	int pids[consumers];
+	int parentPid = getpid();	
 	
 	pid = fork();
 
@@ -43,7 +50,7 @@ int main(int argc, char *argv[])
 	 */
 	
 	if(pid==0) {
-		consumer();
+		consumer(parentPid);
 	}
 	else
 	{
@@ -54,19 +61,14 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-int main2(int argc, char*argv[]){
-    char* filename = "data.csv";
-    int consumers = 1;
-    int pids = 0;
-    int lines = 1000;
-    producer(filename, &pids, consumers, lines);
-    return 0;
-}
+
+//--------------CONSUMER--------------------------------------------------------------------------------
+//---------------------------------------------------------------------------------------------------
 
 int dades_pendents = 0;
 int final = 0;
 
-void destroy(int s){
+void end(int s){
     final = 1;
 }
 
@@ -74,90 +76,105 @@ void sigusr(int signe){
     dades_pendents = 1;
 }
 
-void consumer()
+/**
+*  Consumer llegeix el fitxer utilitzan un buffer a memoria per tal de solicitar menys crides read del sistema.
+*
+**/
+
+void consumer(int parentPid)
 {
 	int fd;
 	char filename[12];
-
-    printf("Consumidor pid: %d\n", getpid());
+	int buff_s = CONSUMER_BUFFER_SIZE, buff[CONSUMER_BUFFER_SIZE]; //TODO: Aixo s'hauria d'instanciar en el heap.
+	int dataNum, i, maxRead, passenger_count = 0, trip_time_count = 0;
+	int dataNumAux;
 
     signal(SIGUSR1, sigusr);
-    signal(SIGTERM, destroy);
-    /*
-     * TODO: preparar el codigo para recibir senyales del productor
-     */
+    signal(SIGTERM, end);
+    
+    sprintf(filename, "%d", getpid());
+    fd = open(filename, O_CREAT | O_RDWR | O_SYNC | O_APPEND , S_IRUSR | S_IWUSR | S_IRGRP);
+
     while(!final){    
         while(!dades_pendents);
         dades_pendents = 0;
-                
-        // Abrimos un fichero con el nombre = pid para recibir los datos
-        sprintf(filename, "%d", getpid());
-        fd = open(filename, O_CREAT | O_RDWR | O_SYNC | O_APPEND , S_IRUSR | S_IWUSR | S_IRGRP);
-
-        /*
-        *  TODO: Bucle para leer y procesar los datos del fichero que envia el productor
-        */
-        int l = read(fd, &l, 4);
-        printf("numero de linies per llegir: %d\n", l);
-    }
-    printf("\nEND consumer\n");    
-    close(fd);
+        read(fd, &dataNum, 4);
+        //printf("\n================================\n===================================\n\n");
+        dataNumAux = dataNum;
+        dataNum *= 2;
+        while(dataNum > 0){    
+            maxRead = dataNum < buff_s ? dataNum : buff_s;
+            //printf("maxRead: %d\n", maxRead);
+            read(fd, &buff, maxRead*4);
+            for(i = 0; i < maxRead-1; i+=2){
+                //printf("passengers: %d, trip time: %d \n", buff[i], buff[i+1]);
+                passenger_count += buff[i];
+                trip_time_count += buff[i+1];
+            }
+            dataNum -= maxRead;
+        }
+        printf("Consumer ha leido %d datos\n", dataNumAux);
+    }   
+    
+ 	int result[2] = {passenger_count, trip_time_count};
+ 	write(fd, result, 8); 
+ 	 
+ 	close(fd);
     remove(filename);
-
-	/*
- 	 * TODO: Codigo para entregar resultado parcial al productor a traves del mismo fichero
-     *       que se ha utilizado para recibir datos.
- 	 */	
 
 	exit(0);
 }
+
+//-----------------------------------------------------------------------------------------------------
+
+//--------------PRODUCER-------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------------------------
+
 
 void producer(char* filedata, int* pids, int total_consumers, int lines)
 {
     FILE* file = fopen(filedata, "r");
     struct Data* d;
     char filename[12] = "";
-    int i, fd;
-
-    printf("Productor pid: %d\n",getpid());	
+    int i;
+    int fd[total_consumers];
+    int results[total_consumers][2];
+    for(i = 0; i < total_consumers; i++){
+        sprintf(filename, "%d", pids[i]);
+        fd[i] = open(filename, O_CREAT | O_RDWR | O_SYNC | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP);
+    }    
 
     d = get_data(file,lines);
     while(d->total > 0)
     {		
-        printf("Productor ha leido %d lineas\n", d->total);		
+        //printf("Productor ha leido %d datos\n", d->total);		
         
         send_consumer(d,pids[0]);
-        kill(pids[0], SIGUSR1);
-        /*
-         * TODO: Codigo para notificar que hay datos a los consumidores (SIGUSR1)
-         */			
+        kill(pids[0], SIGUSR1);	
         d = get_data(file,lines);
     }
-
-    /*
-     * TODO: Codigo para notificar que finalicen los consumidores (SIGTERM)
-     */
+    
     kill(pids[0], SIGTERM);
 
-    // Espera que los consumidores terminen
     for(i=0;i<total_consumers;i++)
         wait(NULL);
 
     float media_pasajeros = 0, media_tiempo_de_viaje = 0;
     int lineas = 0;
-
-    sprintf(filename, "%d", pids[0]);
-
-    /*
-     * TODO: Leer resultados parciales de los consumidores y calcular valores finales.
-     * Borrar el fichero filename al finalizar.
-     */
- 
-    //remove(filename);	
+    
+    for(i = 0; i < total_consumers; i++){
+        lseek(fd[i], -2, SEEK_END);
+        read(fd[i], &results[i], 8);
+        close(fd[i]);
+        sprintf(filename, "%d", pids[i]);
+        remove(filename);
+    }
 
     printf("TOTAL de lineas leidas: %d\n", lineas);
     printf("Media de pasajeros: %f - Media de tiempo de viaje: %f \n",media_pasajeros,media_tiempo_de_viaje);
 }
+
+//----------------------------------------------------------------------------------------------------------------------
 
 void send_consumer(struct Data* d, int consumer)
 {
@@ -176,12 +193,12 @@ void send_consumer(struct Data* d, int consumer)
         data[i+1] = d->trip_time_in_secs[j];
     }
     
-    write(fd, data, l);
+    write(fd, data, l*4);
 
     close(fd);
 }
 
-//
+
 
 int get_column_int(char* line, int num)
 {
