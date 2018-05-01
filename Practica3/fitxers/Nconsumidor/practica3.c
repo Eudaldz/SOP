@@ -32,29 +32,26 @@ int main(int argc, char *argv[])
 
 	if(argc != 4)
 	{
-        printf("Hacen falta tres argumentos: %s <file> <num_consumers> <size_buffer>\n", argv[0]);
+    printf("Hacen falta tres argumentos: %s <file> <num_consumers> <size_buffer>\n", argv[0]);
 		exit(1);
 	}
 
 	char* filename = argv[1];
-	int consumers = atoi(argv[2]);
+	int consumers = 1;
 	int lines = atoi(argv[3]);
-	consumers = 1; /* forzamos un consumidor */
 	int pids[consumers];
-	int parentPid = getpid();
 
-	pid = fork();
-
-	/*
-	 * TODO: Modificar (una vez funcione el resto) para crear mas de un consumidor
-	 */
+  int k = 0;
+  while ((pid=fork()!= 0) && (k<consumers)){
+    pids[k] = pid;
+    k++;
+  }
 
 	if(pid==0) {
-		consumer(parentPid);
+		consumer();
 	}
 	else
 	{
-		pids[0] = pid;
 		producer(filename,pids,consumers,lines);
 	}
 
@@ -81,7 +78,7 @@ void sigusr(int signe){
 *
 **/
 
-void consumer(int parentPid)
+void consumer()
 {
 	int fd;
 	char filename[12];
@@ -89,38 +86,40 @@ void consumer(int parentPid)
 	int dataNum, i, maxRead, passenger_count = 0, trip_time_count = 0;
 	int dataNumAux;
 
-    signal(SIGUSR1, sigusr);
-    signal(SIGTERM, end);
+  printf("Consumidor pid: %d\n", getpid());
 
-    sprintf(filename, "%d", getpid());
-    fd = open(filename, O_CREAT | O_RDWR | O_SYNC | O_APPEND , S_IRUSR | S_IWUSR | S_IRGRP);
+  signal(SIGUSR1, sigusr);
+  signal(SIGTERM, end);
 
-    while(!final){
-        while(!dades_pendents);
-        dades_pendents = 0;
-        read(fd, &dataNum, 4);
-        //printf("\n================================\n===================================\n\n");
-        dataNumAux = dataNum;
-        dataNum *= 2;
-        while(dataNum > 0){
-            maxRead = dataNum < buff_s ? dataNum : buff_s;
-            //printf("maxRead: %d\n", maxRead);
-            read(fd, &buff, maxRead*4);
-            for(i = 0; i < maxRead-1; i+=2){
-                //printf("passengers: %d, trip time: %d \n", buff[i], buff[i+1]);
-                passenger_count += buff[i];
-                trip_time_count += buff[i+1];
-            }
-            dataNum -= maxRead;
-        }
-        printf("Consumer ha leido %d datos\n", dataNumAux);
+  sprintf(filename, "%d", getpid());
+  fd = open(filename, O_CREAT | O_RDWR | O_SYNC | O_APPEND , S_IRUSR | S_IWUSR | S_IRGRP);
+
+  while(!final){
+      while(!dades_pendents);
+      dades_pendents = 0;
+      read(fd, &dataNum, 4);
+      //printf("\n================================\n===================================\n\n");
+      dataNumAux = dataNum;
+      dataNum *= 2;
+      while(dataNum > 0){
+          maxRead = dataNum < buff_s ? dataNum : buff_s;
+          //printf("maxRead: %d\n", maxRead);
+          read(fd, &buff, maxRead*4);
+          for(i = 0; i < maxRead-1; i+=2){
+              //printf("passengers: %d, trip time: %d \n", buff[i], buff[i+1]);
+              passenger_count += buff[i];
+              trip_time_count += buff[i+1];
+          }
+          dataNum -= maxRead;
+      }
+      printf("Consumer ha leido %d datos\n", dataNumAux);
     }
 
  	int result[2] = {passenger_count, trip_time_count};
  	write(fd, result, 8);
 
  	close(fd);
-    remove(filename);
+  remove(filename);
 
 	exit(0);
 }
@@ -141,29 +140,33 @@ void producer(char* filedata, int* pids, int total_consumers, int lines)
     int results[total_consumers][2];
     int readLines = 0;
 
+    printf("Productor pid: %d\n",getpid());
+
     for(i = 0; i < total_consumers; i++){
         sprintf(filename, "%d", pids[i]);
         fd[i] = open(filename, O_CREAT | O_RDWR | O_SYNC | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP);
     }
 
     d = get_data(file,lines);
+    int k = 0;
     while(d->total > 0)
     {
         //printf("Productor ha leido %d datos\n", d->total);
 
         send_consumer(d,pids[0]);
-        kill(pids[0], SIGUSR1);
+        kill(pids[k], SIGUSR1);
         readLines += d->total;
         d = get_data(file,lines);
+        k = (k + 1) % total_consumers;
     }
 
-    kill(pids[0], SIGTERM);
+    for(i=0;i<total_consumers;i++)
+        kill(pids[i], SIGTERM);
 
     for(i=0;i<total_consumers;i++)
         wait(NULL);
 
     float media_pasajeros = 0, media_tiempo_de_viaje = 0;
-    int lineas = 0;
 
     for(i = 0; i < total_consumers; i++){
         lseek(fd[i], -2, SEEK_END);
@@ -178,7 +181,7 @@ void producer(char* filedata, int* pids, int total_consumers, int lines)
     media_pasajeros /= readLines;
     media_tiempo_de_viaje /= readLines;
 
-    printf("TOTAL de lineas leidas: %d\n", lineas);
+    printf("TOTAL de lineas leidas: %d\n", readLines);
     printf("Media de pasajeros: %f - Media de tiempo de viaje: %f \n",media_pasajeros,media_tiempo_de_viaje);
 }
 
