@@ -20,7 +20,7 @@ struct Data {
 };
 
 void consumer();
-void producer(char*,int*, int, int);
+void producer(char*,int, int);
 struct Data* get_data(FILE*,int);
 void send_consumer(struct Data*, int);
 
@@ -30,17 +30,14 @@ int main(int argc, char *argv[])
 {
 	int pid;
 
-	if(argc != 4)
+	if(argc != 3)
 	{
-    printf("Hacen falta tres argumentos: %s <file> <num_consumers> <size_buffer>\n", argv[0]);
+    printf("Hacen falta dos argumentos: %s <file> <size_buffer>\n", argv[0]);
 		exit(1);
 	}
 
 	char* filename = argv[1];
-	int consumers = atoi(argv[2]);
-	int lines = atoi(argv[3]);
-  consumers = 1; /* forzamos un consumidor */
-	int pids[consumers];
+	int lines = atoi(argv[2]);
 
 	pid = fork();
 
@@ -49,8 +46,7 @@ int main(int argc, char *argv[])
 	}
 	else
 	{
-		pids[0] = pid;
-		producer(filename,pids,consumers,lines);
+		producer(filename,pid,lines);
 	}
 
     return 0;
@@ -90,21 +86,19 @@ void consumer()
   signal(SIGTERM, end);
 
   sprintf(filename, "%d", getpid());
-  fd = open(filename, O_CREAT | O_RDWR | O_SYNC | O_APPEND , S_IRUSR | S_IWUSR | S_IRGRP);
+  fd = open(filename, O_CREAT | O_RDWR | O_SYNC | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP);
 
   while(!final){
-      while(!dades_pendents);
+      while(!dades_pendents && !final);
+      
       dades_pendents = 0;
       read(fd, &dataNum, 4);
-      //printf("\n================================\n===================================\n\n");
       dataNumAux = dataNum;
       dataNum *= 2;
       while(dataNum > 0){
           maxRead = dataNum < buff_s ? dataNum : buff_s;
-          //printf("maxRead: %d\n", maxRead);
           read(fd, &buff, maxRead*4);
           for(i = 0; i < maxRead-1; i+=2){
-              //printf("passengers: %d, trip time: %d \n", buff[i], buff[i+1]);
               passenger_count += buff[i];
               trip_time_count += buff[i+1];
           }
@@ -114,10 +108,9 @@ void consumer()
     }
 
  	int result[2] = {passenger_count, trip_time_count};
- 	write(fd, result, 8);
-
+    ftruncate(fd, 0);
+    write(fd, result, 8);
  	close(fd);
-  remove(filename);
 
 	exit(0);
 }
@@ -128,51 +121,48 @@ void consumer()
 //----------------------------------------------------------------------------------------------------
 
 
-void producer(char* filedata, int* pids, int total_consumers, int lines)
+void producer(char* filedata, int pid,  int lines)
 {
     FILE* file = fopen(filedata, "r");
     struct Data* d;
     char filename[12] = "";
     int i;
-    int fd[total_consumers];
-    int results[total_consumers][2];
+    int fd;
+    int results[2];
     int readLines = 0;
 
     printf("Productor pid: %d\n",getpid());
 
-    sprintf(filename, "%d", pids[0]);
-    fd[0] = open(filename, O_CREAT | O_RDWR | O_SYNC | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP);
+    sprintf(filename, "%d", pid);
+    fd = open(filename, O_CREAT | O_RDWR | O_SYNC | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP);
 
 
     d = get_data(file,lines);
     while(d->total > 0)
     {
-        //printf("Productor ha leido %d datos\n", d->total);
-
-        send_consumer(d,pids[0]);
-        kill(pids[0], SIGUSR1);
+        printf("Productor ha leido %d datos\n", d->total);
+        send_consumer(d,pid);
+        kill(pid, SIGUSR1);
         readLines += d->total;
         d = get_data(file,lines);
     }
 
-    kill(pids[0], SIGTERM);
+    kill(pid, SIGTERM);
 
-    for(i=0;i<total_consumers;i++)
-        wait(NULL);
+    wait(NULL);
 
     float media_pasajeros = 0, media_tiempo_de_viaje = 0;
 
-    lseek(fd[0], -2, SEEK_END);
-    read(fd[0], &results[i], 8);
-    close(fd[0]);
-    sprintf(filename, "%d", pids[0]);
+    read(fd, &results, 8);
+    close(fd);
+    sprintf(filename, "%d", pid);
     remove(filename);
-    media_pasajeros == results[0][0];
-    media_tiempo_de_viaje == results[0][1];
+    media_pasajeros = results[0];
+    media_tiempo_de_viaje = results[1];
 
     media_pasajeros /= readLines;
     media_tiempo_de_viaje /= readLines;
-
+    
     printf("TOTAL de lineas leidas: %d\n", readLines);
     printf("Media de pasajeros: %f - Media de tiempo de viaje: %f \n",media_pasajeros,media_tiempo_de_viaje);
 }

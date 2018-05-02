@@ -37,15 +37,15 @@ int main(int argc, char *argv[])
 	}
 
 	char* filename = argv[1];
-	int consumers = 1;
+	int consumers = atoi(argv[2]);
 	int lines = atoi(argv[3]);
 	int pids[consumers];
 
-  int k = 0;
-  while ((pid=fork()!= 0) && (k<consumers)){
-    pids[k] = pid;
-    k++;
-  }
+    int k = 0;
+    while ((k<consumers) && ((pid=fork())!= 0)){
+        pids[k] = pid;
+        k++;
+    }
 
 	if(pid==0) {
 		consumer();
@@ -67,6 +67,7 @@ int final = 0;
 
 void end(int s){
     final = 1;
+    printf("final CONSUMER\n");
 }
 
 void sigusr(int signe){
@@ -85,43 +86,41 @@ void consumer()
 	int buff_s = CONSUMER_BUFFER_SIZE, buff[CONSUMER_BUFFER_SIZE]; //TODO: Aixo s'hauria d'instanciar en el heap.
 	int dataNum, i, maxRead, passenger_count = 0, trip_time_count = 0;
 	int dataNumAux;
+    int pid = getpid();
 
-  printf("Consumidor pid: %d\n", getpid());
+    printf("Consumidor pid: %d\n", getpid());
 
-  signal(SIGUSR1, sigusr);
-  signal(SIGTERM, end);
+    signal(SIGUSR1, sigusr);
+    signal(SIGTERM, end);
 
-  sprintf(filename, "%d", getpid());
-  fd = open(filename, O_CREAT | O_RDWR | O_SYNC | O_APPEND , S_IRUSR | S_IWUSR | S_IRGRP);
+    sprintf(filename, "%d", getpid());
+    fd = open(filename, O_CREAT | O_RDWR | O_SYNC | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP);
 
-  while(!final){
-      while(!dades_pendents);
-      dades_pendents = 0;
-      read(fd, &dataNum, 4);
-      //printf("\n================================\n===================================\n\n");
-      dataNumAux = dataNum;
-      dataNum *= 2;
-      while(dataNum > 0){
-          maxRead = dataNum < buff_s ? dataNum : buff_s;
-          //printf("maxRead: %d\n", maxRead);
-          read(fd, &buff, maxRead*4);
-          for(i = 0; i < maxRead-1; i+=2){
-              //printf("passengers: %d, trip time: %d \n", buff[i], buff[i+1]);
-              passenger_count += buff[i];
-              trip_time_count += buff[i+1];
-          }
-          dataNum -= maxRead;
-      }
-      printf("Consumer ha leido %d datos\n", dataNumAux);
+    while(!final){
+        while(!dades_pendents && !final);
+        
+        dades_pendents = 0;
+        read(fd, &dataNum, 4);
+        dataNumAux = dataNum;
+        dataNum *= 2;
+        while(dataNum > 0){
+            maxRead = dataNum < buff_s ? dataNum : buff_s;
+            read(fd, &buff, maxRead*4);
+            for(i = 0; i < maxRead-1; i+=2){
+                passenger_count += buff[i];
+                trip_time_count += buff[i+1];
+            }
+            dataNum -= maxRead;
+        }
+        printf("Consumer %d ha leido %d datos\n", pid , dataNumAux);
     }
 
- 	int result[2] = {passenger_count, trip_time_count};
- 	write(fd, result, 8);
-
- 	close(fd);
-  remove(filename);
-
-	exit(0);
+        int result[2] = {passenger_count, trip_time_count};
+        ftruncate(fd, 0);
+        write(fd, result, 8);
+        close(fd);
+        printf("consumer %d end\n", getpid());
+        exit(0);
 }
 
 //-----------------------------------------------------------------------------------------------------
@@ -141,6 +140,7 @@ void producer(char* filedata, int* pids, int total_consumers, int lines)
     int readLines = 0;
 
     printf("Productor pid: %d\n",getpid());
+    printf("pids[0]: %d", pids[0]);
 
     for(i = 0; i < total_consumers; i++){
         sprintf(filename, "%d", pids[i]);
@@ -151,25 +151,25 @@ void producer(char* filedata, int* pids, int total_consumers, int lines)
     int k = 0;
     while(d->total > 0)
     {
-        //printf("Productor ha leido %d datos\n", d->total);
-
-        send_consumer(d,pids[0]);
+        printf("Productor ha leido %d datos\n", d->total);
+        send_consumer(d,pids[k]);
         kill(pids[k], SIGUSR1);
         readLines += d->total;
         d = get_data(file,lines);
         k = (k + 1) % total_consumers;
     }
 
-    for(i=0;i<total_consumers;i++)
+    for(i=0;i<total_consumers;i++){
         kill(pids[i], SIGTERM);
+    }
 
-    for(i=0;i<total_consumers;i++)
+    for(i=0;i<total_consumers;i++){
         wait(NULL);
+    }
 
     float media_pasajeros = 0, media_tiempo_de_viaje = 0;
 
     for(i = 0; i < total_consumers; i++){
-        lseek(fd[i], -2, SEEK_END);
         read(fd[i], &results[i], 8);
         close(fd[i]);
         sprintf(filename, "%d", pids[i]);
